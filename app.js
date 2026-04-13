@@ -33,7 +33,8 @@ const state = {
     view: 'dashboard',       // 'dashboard' | 'detail' | 'add-asset' | 'edit-asset' | 'add-update' | 'add-anchor'
     selectedAssetId: null,
     data: null,
-    chartInstance: null
+    chartInstance: null,
+    chartScale: '5Y'         // '1Y' | '3Y' | '5Y' | '10Y' | 'ALL'
 };
 
 // ==============================
@@ -592,7 +593,13 @@ function renderDetail(id) {
         <div class="card">
             <div class="card-header">
                 <div class="card-title">Evolución del valor</div>
-                <span style="font-size:12px;color:var(--text-muted)">— Proyección  - - Futuro</span>
+                <div class="chart-scale-group">
+                    <button class="chart-scale-btn${state.chartScale === '1Y'  ? ' active' : ''}" data-action="chart-scale" data-scale="1Y">1A</button>
+                    <button class="chart-scale-btn${state.chartScale === '3Y'  ? ' active' : ''}" data-action="chart-scale" data-scale="3Y">3A</button>
+                    <button class="chart-scale-btn${state.chartScale === '5Y'  ? ' active' : ''}" data-action="chart-scale" data-scale="5Y">5A</button>
+                    <button class="chart-scale-btn${state.chartScale === '10Y' ? ' active' : ''}" data-action="chart-scale" data-scale="10Y">10A</button>
+                    <button class="chart-scale-btn${state.chartScale === 'ALL' ? ' active' : ''}" data-action="chart-scale" data-scale="ALL">Todo</button>
+                </div>
             </div>
             <div class="card-body">
                 <div class="chart-container">
@@ -653,6 +660,61 @@ function renderDetail(id) {
         </div>
     </div>
 
+    <!-- Methodology Panel -->
+    <details class="methodology-panel">
+        <summary class="methodology-summary">
+            <span class="methodology-icon">◈</span>
+            <span>¿Cómo se calcula este valor?</span>
+            <span class="methodology-chevron">›</span>
+        </summary>
+        <div class="methodology-body">
+            <div class="methodology-grid">
+                <div class="methodology-block">
+                    <div class="methodology-block-title">1 · Curva de depreciación acelerada</div>
+                    <div class="methodology-block-text">El precio efectivo (compra menos subvenciones) se deprecia año a año con tasas decrecientes: más rápido al principio, más lento con la edad.</div>
+                    <table class="meth-table">
+                        <thead><tr><th>Año</th><th>Coche EV</th><th>Ebike</th></tr></thead>
+                        <tbody>
+                            ${CONFIG.depreciationRates.car.map((r, i) => `<tr><td>${i + 1}</td><td>−${(r * 100).toFixed(0)}%</td><td>−${(CONFIG.depreciationRates.ebike[i] * 100).toFixed(0)}%</td></tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="methodology-block">
+                    <div class="methodology-block-title">2 · Factores de ajuste</div>
+                    <div class="methodology-sub-title">SOH de batería</div>
+                    <table class="meth-table">
+                        <thead><tr><th>SOH</th><th>Factor</th></tr></thead>
+                        <tbody>
+                            <tr><td>≥ 90%</td><td>×1,00</td></tr>
+                            <tr><td>80–89%</td><td>×0,95</td></tr>
+                            <tr><td>70–79%</td><td>×0,88</td></tr>
+                            <tr><td>60–69%</td><td>×0,78</td></tr>
+                            <tr><td>&lt; 60%</td><td>×0,65</td></tr>
+                        </tbody>
+                    </table>
+                    <div class="methodology-sub-title" style="margin-top:12px">Km reales vs. esperados</div>
+                    <table class="meth-table">
+                        <thead><tr><th>Ratio anual</th><th>Factor</th></tr></thead>
+                        <tbody>
+                            <tr><td>&gt; 2,0×</td><td>×0,88</td></tr>
+                            <tr><td>1,5–2,0×</td><td>×0,93</td></tr>
+                            <tr><td>1,2–1,5×</td><td>×0,97</td></tr>
+                            <tr><td>0,7–1,2×</td><td>×1,00</td></tr>
+                            <tr><td>0,5–0,7×</td><td>×1,02</td></tr>
+                            <tr><td>&lt; 0,5×</td><td>×1,04</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="methodology-block">
+                    <div class="methodology-block-title">3 · Anclaje al precio de mercado</div>
+                    <div class="methodology-block-text">Cuando introduces un precio de mercado, se mezcla con el modelo teórico. El peso del mercado va del <strong>70%</strong> (el día que lo introduces) al <strong>30%</strong> (6 meses después), cuando el dato ya está "caducando".</div>
+                    <div class="methodology-block-text" style="margin-top:8px"><strong>Metodología para buscar precios:</strong> busca 3–5 anuncios de activos similares (mismo tipo, año, km similares). Descarta los extremos. Usa la mediana. Fuentes: Wallapop, Coches.net, eBay Kleinanzeigen (ebikes).</div>
+                    <div class="methodology-block-text" style="margin-top:8px">Actualiza cada <strong>6 meses</strong>. La app te avisará cuando sea el momento.</div>
+                </div>
+            </div>
+        </div>
+    </details>
+
     <!-- Updates history -->
     <div class="card" style="margin-bottom:20px">
         <div class="card-header">
@@ -709,13 +771,31 @@ function renderAnchorsTable(asset) {
         return '<div class="history-empty">Sin precios de mercado registrados.</div>';
     }
     const sorted = [...asset.marketAnchors].sort((a, b) => new Date(b.date) - new Date(a.date));
-    const rows = sorted.map(a => `
+    const rows = sorted.map(a => {
+        const refsHtml = a.refs && a.refs.length > 0 ? `
+            <details class="refs-detail">
+                <summary>${a.refs.length} referencia${a.refs.length > 1 ? 's' : ''} consultada${a.refs.length > 1 ? 's' : ''}</summary>
+                <table class="refs-inner-table">
+                    <thead><tr><th>Precio</th><th>Año</th><th>Km</th><th>Color</th><th>Fuente</th></tr></thead>
+                    <tbody>
+                        ${a.refs.map(r => `<tr>
+                            <td><strong>${formatEur(r.price)}</strong></td>
+                            <td>${r.year || '—'}</td>
+                            <td>${r.km !== null && r.km !== undefined ? Number(r.km).toLocaleString('es-ES') + ' km' : '—'}</td>
+                            <td>${escHtml(r.color || '—')}</td>
+                            <td>${escHtml(r.source || '—')}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </details>` : '';
+        return `
         <tr>
             <td>${formatDateShort(a.date)}</td>
             <td><strong>${formatEur(a.price)}</strong></td>
             <td>${escHtml(a.source || '—')}</td>
-            <td>${escHtml(a.notes || '—')}</td>
-        </tr>`).join('');
+            <td>${escHtml(a.notes || '—')}${refsHtml}</td>
+        </tr>`;
+    }).join('');
     return `
         <table class="history-table">
             <thead>
@@ -723,7 +803,7 @@ function renderAnchorsTable(asset) {
                     <th>Fecha</th>
                     <th>Precio</th>
                     <th>Fuente</th>
-                    <th>Notas</th>
+                    <th>Notas / Referencias</th>
                 </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -913,25 +993,52 @@ function renderAnchorForm(id) {
 
         <form id="anchor-form">
             <input type="hidden" name="assetId" value="${asset.id}">
+
             <div class="form-card">
+                <div class="form-section-title">Referencias encontradas</div>
+                <div class="form-hint" style="margin-bottom:12px">
+                    Añade los anuncios que hayas consultado (3–5 idealmente). Descarta los extremos y usa la mediana como precio final.
+                    Busca activos similares: mismo tipo, año parecido, km similares, mismo color si es posible.
+                    <strong>Anuncios de profesionales suelen estar 5–10% por encima del precio real de mercado privado.</strong>
+                </div>
+
+                <div id="refs-container" class="refs-container"></div>
+
+                <button type="button" id="add-ref-btn" class="btn btn-outline btn-sm" style="margin-bottom:16px">
+                    + Añadir referencia
+                </button>
+
+                <div id="ref-summary" class="ref-summary" style="display:none">
+                    <div class="ref-summary-row">
+                        <span class="ref-summary-label">Mediana calculada</span>
+                        <span class="ref-summary-value" id="ref-median-val">—</span>
+                        <button type="button" id="use-median-btn" class="btn btn-sm btn-outline">Usar este valor ↓</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-card">
+                <div class="form-section-title">Precio confirmado</div>
+
                 <div class="form-group">
                     <label class="form-label">Fecha de consulta</label>
                     <input class="form-input" name="date" type="date" value="${today}" required>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">Precio de mercado (€)</label>
-                    <input class="form-input" name="price" type="number" min="0" step="100" placeholder="Ej: 18500" required>
-                    <div class="form-hint">Precio al que se venden activos similares al tuyo ahora mismo.</div>
+                    <label class="form-label">Precio de mercado (€) <span style="font-weight:400;color:var(--text-muted)">— mediana ajustada</span></label>
+                    <input class="form-input" name="price" id="anchor-price-input" type="number" min="0" step="100" placeholder="Ej: 21400" required>
+                    <div class="form-hint">Precio al que se venden activos similares al tuyo. Ajusta si tu activo tiene características que justifiquen diferencia (color, km, versión).</div>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">Fuente</label>
+                    <label class="form-label">Fuente principal</label>
                     <select class="form-select" name="source">
                         <option value="Wallapop">Wallapop</option>
                         <option value="Coches.net">Coches.net</option>
+                        <option value="eBay Kleinanzeigen">eBay Kleinanzeigen</option>
                         <option value="Milanuncios">Milanuncios</option>
-                        <option value="Concesionario">Concesionario</option>
+                        <option value="Concesionario">Concesionario / Profesional</option>
                         <option value="Motor.es">Motor.es</option>
                         <option value="Otra">Otra</option>
                     </select>
@@ -939,7 +1046,7 @@ function renderAnchorForm(id) {
 
                 <div class="form-group">
                     <label class="form-label">Notas <span style="font-weight:400;color:var(--text-muted)">(opcional)</span></label>
-                    <input class="form-input" name="notes" type="text" placeholder="Ej: 3 anuncios similares, estado bueno...">
+                    <input class="form-input" name="notes" type="text" placeholder="Ej: 2 anuncios de profesionales, color similar, km comparables">
                 </div>
             </div>
 
@@ -951,6 +1058,53 @@ function renderAnchorForm(id) {
     </div>`;
 }
 
+// ---- Anchor Ref Helpers ----
+
+function addAnchorRefRow(defaults = {}) {
+    const container = document.getElementById('refs-container');
+    if (!container) return;
+
+    const row = document.createElement('div');
+    row.className = 'ref-row';
+    row.innerHTML = `
+        <input class="form-input ref-price" type="number" min="0" step="100" placeholder="Precio €" value="${defaults.price || ''}" style="width:110px">
+        <input class="form-input ref-year"  type="number" min="2000" max="2035" placeholder="Año" value="${defaults.year || ''}" style="width:74px">
+        <input class="form-input ref-km"    type="number" min="0" step="1" placeholder="Km" value="${defaults.km || ''}" style="width:90px">
+        <input class="form-input ref-color" type="text" placeholder="Color" value="${defaults.color || ''}" style="width:110px">
+        <input class="form-input ref-src"   type="text" placeholder="Fuente" value="${defaults.source || ''}" style="width:130px">
+        <button type="button" class="btn btn-sm btn-danger remove-ref" title="Eliminar">✕</button>
+    `;
+    container.appendChild(row);
+    updateAnchorMedian();
+}
+
+function updateAnchorMedian() {
+    const prices = [];
+    document.querySelectorAll('.ref-row .ref-price').forEach(inp => {
+        const v = Number(inp.value);
+        if (v > 0) prices.push(v);
+    });
+
+    const summaryEl = document.getElementById('ref-summary');
+    const medianEl  = document.getElementById('ref-median-val');
+    if (!summaryEl || !medianEl) return;
+
+    if (prices.length === 0) {
+        summaryEl.style.display = 'none';
+        return;
+    }
+
+    prices.sort((a, b) => a - b);
+    const mid    = Math.floor(prices.length / 2);
+    const median = prices.length % 2 !== 0
+        ? prices[mid]
+        : Math.round((prices[mid - 1] + prices[mid]) / 2);
+
+    medianEl.textContent   = formatEur(median);
+    medianEl.dataset.raw   = median;
+    summaryEl.style.display = 'flex';
+}
+
 // ---- Chart ----
 
 function renderChart(id) {
@@ -960,7 +1114,20 @@ function renderChart(id) {
     const canvas = document.getElementById('asset-chart');
     if (!canvas) return;
 
-    const points   = getProjectedValues(asset);
+    const allPoints    = getProjectedValues(asset);
+    const purchaseDate = new Date(asset.purchaseDate);
+    const scale        = state.chartScale;
+
+    // Filter points to selected scale (always starting from purchase date)
+    let points = allPoints;
+    if (scale !== 'ALL') {
+        const years   = scale === '1Y' ? 1 : scale === '3Y' ? 3 : scale === '5Y' ? 5 : 10;
+        const endDate = new Date(purchaseDate);
+        endDate.setFullYear(endDate.getFullYear() + years);
+        points = allPoints.filter(p => p.date <= endDate);
+        if (points.length === 0) points = allPoints; // fallback
+    }
+
     const now      = new Date();
     const today    = new Date(now.getFullYear(), now.getMonth(), 1);
 
@@ -1101,6 +1268,35 @@ function attachEventListeners() {
     if (updateForm) updateForm.addEventListener('submit', handleSaveUpdate);
     if (anchorForm) anchorForm.addEventListener('submit', handleSaveAnchor);
 
+    // Anchor refs: dynamic rows
+    const addRefBtn = document.getElementById('add-ref-btn');
+    if (addRefBtn) {
+        addRefBtn.addEventListener('click', () => addAnchorRefRow());
+    }
+    const refsContainer = document.getElementById('refs-container');
+    if (refsContainer) {
+        refsContainer.addEventListener('click', e => {
+            if (e.target.classList.contains('remove-ref')) {
+                e.target.closest('.ref-row').remove();
+                updateAnchorMedian();
+            }
+        });
+        refsContainer.addEventListener('input', e => {
+            if (e.target.classList.contains('ref-price')) updateAnchorMedian();
+        });
+    }
+    const useMedianBtn = document.getElementById('use-median-btn');
+    if (useMedianBtn) {
+        useMedianBtn.addEventListener('click', () => {
+            const medianEl = document.getElementById('ref-median-val');
+            const priceInput = document.getElementById('anchor-price-input');
+            if (medianEl && priceInput) {
+                const val = medianEl.dataset.raw;
+                if (val) priceInput.value = val;
+            }
+        });
+    }
+
     // Type select → update suggestions
     const typeSelect = document.getElementById('asset-type-select');
     if (typeSelect) {
@@ -1148,6 +1344,13 @@ function handleAppClick(e) {
         case 'add-anchor':  navigate('add-anchor', id); break;
         case 'delete-asset': handleDeleteAsset(id); break;
         case 'back':        handleBack(); break;
+        case 'chart-scale':
+            state.chartScale = el.dataset.scale;
+            document.querySelectorAll('.chart-scale-btn').forEach(b => {
+                b.classList.toggle('active', b.dataset.scale === state.chartScale);
+            });
+            renderChart(state.selectedAssetId);
+            break;
     }
 }
 
@@ -1242,11 +1445,25 @@ function handleSaveAnchor(e) {
     const asset   = getAssetById(assetId);
     if (!asset) return;
 
+    // Collect refs from DOM
+    const refs = [];
+    document.querySelectorAll('.ref-row').forEach(row => {
+        const price = Number(row.querySelector('.ref-price').value);
+        const km    = row.querySelector('.ref-km').value;
+        const color = row.querySelector('.ref-color').value.trim();
+        const year  = row.querySelector('.ref-year').value;
+        const src   = row.querySelector('.ref-src').value.trim();
+        if (price > 0) {
+            refs.push({ price, km: km ? Number(km) : null, color: color || null, year: year ? Number(year) : null, source: src || null });
+        }
+    });
+
     const anchor = {
         date:   fd.get('date'),
         price:  Number(fd.get('price')),
         source: fd.get('source'),
-        notes:  fd.get('notes').trim()
+        notes:  fd.get('notes').trim(),
+        refs:   refs.length > 0 ? refs : undefined
     };
 
     asset.marketAnchors.push(anchor);

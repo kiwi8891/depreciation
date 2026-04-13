@@ -16,7 +16,7 @@ El usuario anota el **valor actual** del activo en MoneyWiz; MoneyWiz calcula la
 Actualizar cada 6 meses. Fuentes: Wallapop, Coches.net, eBay Kleinanzeigen (ebikes). Metodología: 3-5 anuncios similares → descartar extremos → mediana. Claude NO puede buscar precios — el usuario debe hacerlo y anotarlo en la app.
 
 ## Activos actuales
-- **BYD Dolphin Surf Boost · Azul Cielo** — compra 12/02/2026 · 23.690€ · 2.996km · SOH 100% (no visible aún en app BYD). Precio de mercado: pendiente de consultar por el usuario.
+- **BYD Dolphin Surf Boost · Azul Cielo** — compra 12/02/2026 · 23.690€ · 2.996km · SOH 100% (no visible aún en app BYD). Referencias de mercado encontradas (13/04/2026, profesionales): 2025·1156km·Azul Cielo→21.900€ / 2026·1200km·Amarillo básico→20.900€ → mediana ≈21.400€ (pendiente de introducir en la tool).
 - **Riese & Müller** — pendiente de compra. SOH vía Bosch eBike Connect.
 
 ## Subvenciones
@@ -34,6 +34,6 @@ Campo `subsidies` reduce el precio efectivo. A 11/04/2026 sin subvenciones recib
 Repo: git@github.com:kiwi8891/depreciation.git · rama main · SSH configurado (id_ed25519). No hay gh CLI — usar git directo con SSH.
 
 ## Próximos pasos pendientes
-- Introducir primer precio de mercado del BYD cuando el usuario consulte Wallapop/Coches.net
+- Introducir el precio de mercado del BYD en la tool (mediana ≈21.400€, refs: profesionales, abril 2026)
 - Añadir Riese & Müller cuando se compre
 - Actualizar `subsidies` del BYD cuando lleguen las ayudas MOVES
