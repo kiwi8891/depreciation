@@ -7,12 +7,14 @@
 const CONFIG = {
     // Annual depreciation rates per year of life (index 0 = first year)
     depreciationRates: {
-        car:   [0.25, 0.18, 0.13, 0.10, 0.08, 0.07, 0.06, 0.05, 0.05, 0.05],
-        ebike: [0.20, 0.15, 0.11, 0.09, 0.07, 0.06, 0.05, 0.05, 0.05, 0.05]
+        car:    [0.25, 0.18, 0.13, 0.10, 0.08, 0.07, 0.06, 0.05, 0.05, 0.05],
+        ebike:  [0.20, 0.15, 0.11, 0.09, 0.07, 0.06, 0.05, 0.05, 0.05, 0.05],
+        laptop: [0.22, 0.17, 0.13, 0.10, 0.08, 0.06, 0.05, 0.05, 0.05, 0.05]
     },
     suggestedResidualPct: {
-        car:   12,
-        ebike: 18
+        car:    12,
+        ebike:  18,
+        laptop: 15
     },
     defaultAnnualKm: {
         car:   15000,
@@ -22,8 +24,9 @@ const CONFIG = {
     projectionMonths: 120
 };
 
-const TYPE_LABELS = { car: 'Coche eléctrico', ebike: 'Bici eléctrica' };
-const TYPE_ICONS  = { car: '🚗', ebike: '🚲' };
+const TYPE_LABELS = { car: 'Coche eléctrico', ebike: 'Bici eléctrica', laptop: 'Laptop / Ordenador' };
+const TYPE_ICONS  = { car: '🚗', ebike: '🚲', laptop: '💻' };
+const CONDITION_LABELS = { excellent: 'Excelente', good: 'Bueno', fair: 'Regular', poor: 'Desgastado' };
 
 // ==============================
 // 2. STATE
@@ -167,6 +170,16 @@ function getBatteryFactor(soh) {
 }
 
 /**
+ * Condition factor for laptops (replaces SOH + km for this asset type).
+ */
+function getConditionFactor(condition) {
+    if (condition === 'good')  return 0.95;
+    if (condition === 'fair')  return 0.88;
+    if (condition === 'poor')  return 0.80;
+    return 1.00;
+}
+
+/**
  * Km usage factor vs expected annual km.
  */
 function getKmFactor(asset, update) {
@@ -226,8 +239,12 @@ function calculateValue(asset, targetDate = new Date()) {
     // 2. Adjustments from latest update
     const update = getLatestUpdate(asset, targetDate);
     if (update) {
-        value *= getBatteryFactor(update.batterySoh);
-        value *= getKmFactor(asset, update);
+        if (asset.type === 'laptop') {
+            value *= getConditionFactor(update.batteryCondition);
+        } else {
+            value *= getBatteryFactor(update.batterySoh);
+            value *= getKmFactor(asset, update);
+        }
     }
 
     // 3. Floor
@@ -477,6 +494,15 @@ function renderAssetCard(asset) {
                         -${formatEur(monthlyDepr)}
                     </div>
                 </div>
+                ${asset.type === 'laptop' ? `
+                <div class="asset-metric">
+                    <div class="asset-metric-label">Condición</div>
+                    <div class="asset-metric-value">${update && update.batteryCondition ? CONDITION_LABELS[update.batteryCondition] || '—' : '—'}</div>
+                </div>
+                <div class="asset-metric">
+                    <div class="asset-metric-label">Fuente</div>
+                    <div class="asset-metric-value muted">Wallapop / eBay</div>
+                </div>` : `
                 ${update && update.km !== null && update.km !== undefined ? `
                 <div class="asset-metric">
                     <div class="asset-metric-label">Kilómetros</div>
@@ -486,7 +512,7 @@ function renderAssetCard(asset) {
                 <div class="asset-metric">
                     <div class="asset-metric-label">SOH Batería</div>
                     <div class="asset-metric-value ${update.batterySoh < 80 ? 'danger' : update.batterySoh < 90 ? 'warning' : 'success'}">${update.batterySoh}%</div>
-                </div>` : '<div class="asset-metric"><div class="asset-metric-label">SOH Batería</div><div class="asset-metric-value muted">—</div></div>'}
+                </div>` : '<div class="asset-metric"><div class="asset-metric-label">SOH Batería</div><div class="asset-metric-value muted">—</div></div>'}`}
             </div>
         </div>
         <div class="asset-card-footer">
@@ -639,6 +665,11 @@ function renderDetail(id) {
                         <div class="metric-row-label">Valor residual</div>
                         <div class="metric-row-value">${formatEur(residualVal)} (${asset.residualValuePct}%)</div>
                     </div>
+                    ${asset.type === 'laptop' ? `
+                    <div class="metric-row">
+                        <div class="metric-row-label">Condición</div>
+                        <div class="metric-row-value">${update && update.batteryCondition ? CONDITION_LABELS[update.batteryCondition] || '—' : '—'}</div>
+                    </div>` : `
                     <div class="metric-row">
                         <div class="metric-row-label">Km actuales</div>
                         <div class="metric-row-value">${update && update.km !== null ? Number(update.km).toLocaleString('es-ES') + ' km' : '—'}</div>
@@ -646,15 +677,16 @@ function renderDetail(id) {
                     <div class="metric-row">
                         <div class="metric-row-label">SOH Batería</div>
                         <div class="metric-row-value ${update && update.batterySoh < 80 ? 'danger' : ''}">${update && update.batterySoh !== null ? update.batterySoh + '%' : '—'}</div>
-                    </div>
+                    </div>`}
                     <div class="metric-row">
                         <div class="metric-row-label">Precio mercado</div>
                         <div class="metric-row-value">${anchor ? formatEur(anchor.price) + ' (' + formatDateShort(anchor.date) + ')' : '—'}</div>
                     </div>
+                    ${asset.type !== 'laptop' ? `
                     <div class="metric-row">
                         <div class="metric-row-label">Km/año esperados</div>
                         <div class="metric-row-value muted">${Number(asset.expectedAnnualKm).toLocaleString('es-ES')} km</div>
-                    </div>
+                    </div>` : ''}
                 </div>
             </div>
         </div>
@@ -673,14 +705,25 @@ function renderDetail(id) {
                     <div class="methodology-block-title">1 · Curva de depreciación acelerada</div>
                     <div class="methodology-block-text">El precio efectivo (compra menos subvenciones) se deprecia año a año con tasas decrecientes: más rápido al principio, más lento con la edad.</div>
                     <table class="meth-table">
-                        <thead><tr><th>Año</th><th>Coche EV</th><th>Ebike</th></tr></thead>
+                        <thead><tr><th>Año</th><th>Coche EV</th><th>Ebike</th><th>Laptop</th></tr></thead>
                         <tbody>
-                            ${CONFIG.depreciationRates.car.map((r, i) => `<tr><td>${i + 1}</td><td>−${(r * 100).toFixed(0)}%</td><td>−${(CONFIG.depreciationRates.ebike[i] * 100).toFixed(0)}%</td></tr>`).join('')}
+                            ${CONFIG.depreciationRates.car.map((r, i) => `<tr><td>${i + 1}</td><td>−${(r * 100).toFixed(0)}%</td><td>−${(CONFIG.depreciationRates.ebike[i] * 100).toFixed(0)}%</td><td>−${(CONFIG.depreciationRates.laptop[i] * 100).toFixed(0)}%</td></tr>`).join('')}
                         </tbody>
                     </table>
                 </div>
                 <div class="methodology-block">
                     <div class="methodology-block-title">2 · Factores de ajuste</div>
+                    ${asset.type === 'laptop' ? `
+                    <div class="methodology-sub-title">Condición (laptop)</div>
+                    <table class="meth-table">
+                        <thead><tr><th>Estado</th><th>Factor</th></tr></thead>
+                        <tbody>
+                            <tr><td>Excelente</td><td>×1,00</td></tr>
+                            <tr><td>Bueno</td><td>×0,95</td></tr>
+                            <tr><td>Regular</td><td>×0,88</td></tr>
+                            <tr><td>Desgastado</td><td>×0,80</td></tr>
+                        </tbody>
+                    </table>` : `
                     <div class="methodology-sub-title">SOH de batería</div>
                     <table class="meth-table">
                         <thead><tr><th>SOH</th><th>Factor</th></tr></thead>
@@ -703,12 +746,12 @@ function renderDetail(id) {
                             <tr><td>0,5–0,7×</td><td>×1,02</td></tr>
                             <tr><td>&lt; 0,5×</td><td>×1,04</td></tr>
                         </tbody>
-                    </table>
+                    </table>`}
                 </div>
                 <div class="methodology-block">
                     <div class="methodology-block-title">3 · Anclaje al precio de mercado</div>
                     <div class="methodology-block-text">Cuando introduces un precio de mercado, se mezcla con el modelo teórico. El peso del mercado va del <strong>70%</strong> (el día que lo introduces) al <strong>30%</strong> (6 meses después), cuando el dato ya está "caducando".</div>
-                    <div class="methodology-block-text" style="margin-top:8px"><strong>Metodología para buscar precios:</strong> busca 3–5 anuncios de activos similares (mismo tipo, año, km similares). Descarta los extremos. Usa la mediana. Fuentes: Wallapop, Coches.net, eBay Kleinanzeigen (ebikes).</div>
+                    <div class="methodology-block-text" style="margin-top:8px"><strong>Metodología para buscar precios:</strong> busca 3–5 anuncios de activos similares. Descarta los extremos. Usa la mediana. Fuentes: ${asset.type === 'laptop' ? 'Wallapop, eBay, Back Market.' : 'Wallapop, Coches.net, eBay Kleinanzeigen (ebikes).'}</div>
                     <div class="methodology-block-text" style="margin-top:8px">Actualiza cada <strong>6 meses</strong>. La app te avisará cuando sea el momento.</div>
                 </div>
             </div>
@@ -743,6 +786,29 @@ function renderUpdatesTable(asset) {
         return '<div class="history-empty">Sin actualizaciones registradas.</div>';
     }
     const sorted = [...asset.updates].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    if (asset.type === 'laptop') {
+        const rows = sorted.map(u => `
+            <tr>
+                <td>${formatDateShort(u.date)}</td>
+                <td>${u.batteryCondition ? CONDITION_LABELS[u.batteryCondition] || '—' : '—'}</td>
+                <td>${escHtml(u.incidents || '—')}</td>
+                <td>${escHtml(u.notes || '—')}</td>
+            </tr>`).join('');
+        return `
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Condición</th>
+                        <th>Incidencias</th>
+                        <th>Notas</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>`;
+    }
+
     const rows = sorted.map(u => `
         <tr>
             <td>${formatDateShort(u.date)}</td>
@@ -813,11 +879,12 @@ function renderAnchorsTable(asset) {
 // ---- Asset Form (add/edit) ----
 
 function renderAssetForm(id) {
-    const asset   = id ? getAssetById(id) : null;
-    const isEdit  = !!asset;
-    const type    = asset ? asset.type : 'car';
-    const sugPct  = CONFIG.suggestedResidualPct[type];
-    const sugKm   = CONFIG.defaultAnnualKm[type];
+    const asset    = id ? getAssetById(id) : null;
+    const isEdit   = !!asset;
+    const type     = asset ? asset.type : 'car';
+    const isLaptop = type === 'laptop';
+    const sugPct   = CONFIG.suggestedResidualPct[type];
+    const sugKm    = CONFIG.defaultAnnualKm[type] || 0;
 
     return `
     <div class="form-view">
@@ -836,6 +903,7 @@ function renderAssetForm(id) {
                     <select class="form-select" name="type" id="asset-type-select">
                         <option value="car" ${type === 'car' ? 'selected' : ''}>🚗 Coche eléctrico</option>
                         <option value="ebike" ${type === 'ebike' ? 'selected' : ''}>🚲 Bici eléctrica</option>
+                        <option value="laptop" ${type === 'laptop' ? 'selected' : ''}>💻 Laptop / Ordenador</option>
                     </select>
                 </div>
 
@@ -884,13 +952,13 @@ function renderAssetForm(id) {
                     <div class="form-hint">Valor mínimo estimado al final de la vida útil. El algoritmo sugiere <strong>${sugPct}%</strong> para este tipo de activo.</div>
                 </div>
 
-                <div class="form-group">
+                <div class="form-group" id="km-field-group" style="${isLaptop ? 'display:none' : ''}">
                     <label class="form-label">
                         Kilómetros anuales esperados
                         <span class="suggested-badge" id="suggest-km">Sugerido: ${sugKm.toLocaleString('es-ES')}</span>
                     </label>
                     <input class="form-input" name="expectedAnnualKm" id="km-input" type="number" min="100" step="100"
-                        value="${asset ? asset.expectedAnnualKm : sugKm}" required>
+                        value="${asset && asset.type !== 'laptop' ? asset.expectedAnnualKm : (sugKm || 0)}" ${isLaptop ? '' : 'required'}>
                     <div class="form-hint">Sirve para ajustar la depreciación según el uso real. Más km = más depreciación.</div>
                 </div>
             </div>
@@ -898,17 +966,32 @@ function renderAssetForm(id) {
             <div class="form-card">
                 <div class="form-section-title">Estado inicial</div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label class="form-label">Kilómetros actuales</label>
-                        <input class="form-input" name="initKm" type="number" min="0" step="1" placeholder="0"
-                            value="${asset && asset.updates && asset.updates.length > 0 ? asset.updates[0].km : ''}">
+                <div id="init-vehicle-fields" style="${isLaptop ? 'display:none' : ''}">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Kilómetros actuales</label>
+                            <input class="form-input" name="initKm" type="number" min="0" step="1" placeholder="0"
+                                value="${asset && asset.updates && asset.updates.length > 0 && asset.type !== 'laptop' ? asset.updates[0].km : ''}">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">SOH Batería (%)</label>
+                            <input class="form-input" name="initSoh" type="number" min="0" max="100" step="1" placeholder="100"
+                                value="${asset && asset.updates && asset.updates.length > 0 && asset.type !== 'laptop' ? asset.updates[0].batterySoh : 100}">
+                            <div class="form-hint">100% si el activo es nuevo.</div>
+                        </div>
                     </div>
+                </div>
+
+                <div id="init-laptop-fields" style="${isLaptop ? '' : 'display:none'}">
                     <div class="form-group">
-                        <label class="form-label">SOH Batería (%)</label>
-                        <input class="form-input" name="initSoh" type="number" min="0" max="100" step="1" placeholder="100"
-                            value="${asset && asset.updates && asset.updates.length > 0 ? asset.updates[0].batterySoh : 100}">
-                        <div class="form-hint">100% si el activo es nuevo.</div>
+                        <label class="form-label">Condición inicial</label>
+                        <select class="form-select" name="initCondition">
+                            <option value="excellent" ${!asset || (asset.updates && asset.updates[0] && asset.updates[0].batteryCondition === 'excellent') ? 'selected' : ''}>Excelente — nuevo o como nuevo (0–300 ciclos)</option>
+                            <option value="good" ${asset && asset.updates && asset.updates[0] && asset.updates[0].batteryCondition === 'good' ? 'selected' : ''}>Bueno — desgaste leve (301–600 ciclos)</option>
+                            <option value="fair" ${asset && asset.updates && asset.updates[0] && asset.updates[0].batteryCondition === 'fair' ? 'selected' : ''}>Regular — desgaste visible (601–800 ciclos)</option>
+                            <option value="poor" ${asset && asset.updates && asset.updates[0] && asset.updates[0].batteryCondition === 'poor' ? 'selected' : ''}>Desgastado — 800+ ciclos o daños</option>
+                        </select>
+                        <div class="form-hint">Ciclos en: Sobre este Mac → Info del sistema → Batería → Recuentos de ciclos.</div>
                     </div>
                 </div>
 
@@ -947,6 +1030,17 @@ function renderUpdateForm(id) {
                     <input class="form-input" name="date" type="date" value="${today}" required>
                 </div>
 
+                ${asset.type === 'laptop' ? `
+                <div class="form-group">
+                    <label class="form-label">Condición actual</label>
+                    <select class="form-select" name="batteryCondition">
+                        <option value="excellent">Excelente — como nuevo (0–300 ciclos)</option>
+                        <option value="good">Bueno — desgaste leve (301–600 ciclos)</option>
+                        <option value="fair">Regular — desgaste visible (601–800 ciclos)</option>
+                        <option value="poor">Desgastado — 800+ ciclos o daños</option>
+                    </select>
+                    <div class="form-hint">Ciclos en: Sobre este Mac → Info del sistema → Batería → Recuentos de ciclos.</div>
+                </div>` : `
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Kilómetros actuales</label>
@@ -957,11 +1051,11 @@ function renderUpdateForm(id) {
                         <input class="form-input" name="batterySoh" type="number" min="0" max="100" step="1" placeholder="100" required>
                         <div class="form-hint">Consulta el indicador en la app del fabricante (BYD / Bosch eBike Connect).</div>
                     </div>
-                </div>
+                </div>`}
 
                 <div class="form-group">
                     <label class="form-label">Incidencias / reparaciones <span style="font-weight:400;color:var(--text-muted)">(opcional)</span></label>
-                    <input class="form-input" name="incidents" type="text" placeholder="Ej: Cambio de neumáticos, golpe lateral...">
+                    <input class="form-input" name="incidents" type="text" placeholder="${asset.type === 'laptop' ? 'Ej: Cambio SSD, rotura pantalla...' : 'Ej: Cambio de neumáticos, golpe lateral...'}">
                 </div>
 
                 <div class="form-group">
@@ -1037,6 +1131,8 @@ function renderAnchorForm(id) {
                         <option value="Wallapop">Wallapop</option>
                         <option value="Coches.net">Coches.net</option>
                         <option value="eBay Kleinanzeigen">eBay Kleinanzeigen</option>
+                        <option value="eBay">eBay</option>
+                        <option value="Back Market">Back Market</option>
                         <option value="Milanuncios">Milanuncios</option>
                         <option value="Concesionario">Concesionario / Profesional</option>
                         <option value="Motor.es">Motor.es</option>
@@ -1297,16 +1393,27 @@ function attachEventListeners() {
         });
     }
 
-    // Type select → update suggestions
+    // Type select → update suggestions + toggle vehicle/laptop fields
     const typeSelect = document.getElementById('asset-type-select');
     if (typeSelect) {
-        typeSelect.addEventListener('change', () => {
-            const t    = typeSelect.value;
-            const sugR = document.getElementById('suggest-residual');
-            const sugK = document.getElementById('suggest-km');
+        const applyTypeVisibility = (t) => {
+            const isLap = t === 'laptop';
+            const sugR  = document.getElementById('suggest-residual');
+            const sugK  = document.getElementById('suggest-km');
             if (sugR) sugR.textContent = `Sugerido: ${CONFIG.suggestedResidualPct[t]}%`;
-            if (sugK) sugK.textContent = `Sugerido: ${CONFIG.defaultAnnualKm[t].toLocaleString('es-ES')}`;
-        });
+            if (sugK && !isLap) sugK.textContent = `Sugerido: ${CONFIG.defaultAnnualKm[t].toLocaleString('es-ES')}`;
+
+            const kmGroup     = document.getElementById('km-field-group');
+            const vehicleInit = document.getElementById('init-vehicle-fields');
+            const laptopInit  = document.getElementById('init-laptop-fields');
+            const kmInp       = document.getElementById('km-input');
+
+            if (kmGroup)     kmGroup.style.display     = isLap ? 'none' : '';
+            if (vehicleInit) vehicleInit.style.display = isLap ? 'none' : '';
+            if (laptopInit)  laptopInit.style.display  = isLap ? ''     : 'none';
+            if (kmInp)       kmInp.required             = !isLap;
+        };
+        typeSelect.addEventListener('change', () => applyTypeVisibility(typeSelect.value));
     }
 
     // Suggested badges → fill input
@@ -1324,7 +1431,7 @@ function attachEventListeners() {
     if (suggestKm && kmInput) {
         suggestKm.addEventListener('click', () => {
             const t = document.getElementById('asset-type-select').value;
-            kmInput.value = CONFIG.defaultAnnualKm[t];
+            if (CONFIG.defaultAnnualKm[t]) kmInput.value = CONFIG.defaultAnnualKm[t];
         });
     }
 }
@@ -1371,9 +1478,11 @@ function handleSaveAsset(e) {
     const id = fd.get('id');
     const isEdit = !!id;
 
-    const type = fd.get('type');
-    const initKm  = fd.get('initKm')  !== '' ? Number(fd.get('initKm'))  : null;
-    const initSoh = fd.get('initSoh') !== '' ? Number(fd.get('initSoh')) : 100;
+    const type      = fd.get('type');
+    const isLaptop  = type === 'laptop';
+    const initKm        = fd.get('initKm')        !== '' ? Number(fd.get('initKm'))  : null;
+    const initSoh       = fd.get('initSoh')       !== '' ? Number(fd.get('initSoh')) : 100;
+    const initCondition = fd.get('initCondition') || 'excellent';
 
     const assetData = {
         id:               isEdit ? id : generateId(),
@@ -1384,7 +1493,7 @@ function handleSaveAsset(e) {
         purchasePrice:    Number(fd.get('purchasePrice')),
         subsidies:        Number(fd.get('subsidies')) || 0,
         residualValuePct: Number(fd.get('residualValuePct')),
-        expectedAnnualKm: Number(fd.get('expectedAnnualKm')),
+        expectedAnnualKm: isLaptop ? null : Number(fd.get('expectedAnnualKm')),
         notes:            fd.get('notes').trim(),
         updates:          [],
         marketAnchors:    []
@@ -1395,14 +1504,22 @@ function handleSaveAsset(e) {
         assetData.updates      = existing.updates      || [];
         assetData.marketAnchors = existing.marketAnchors || [];
     } else {
-        // Add initial update with km and SOH at purchase date
-        assetData.updates.push({
-            date:       assetData.purchaseDate,
-            km:         initKm !== null ? initKm : 0,
-            batterySoh: initSoh,
-            incidents:  '',
-            notes:      'Registro inicial'
-        });
+        if (isLaptop) {
+            assetData.updates.push({
+                date:             assetData.purchaseDate,
+                batteryCondition: initCondition,
+                incidents:        '',
+                notes:            'Registro inicial'
+            });
+        } else {
+            assetData.updates.push({
+                date:       assetData.purchaseDate,
+                km:         initKm !== null ? initKm : 0,
+                batterySoh: initSoh,
+                incidents:  '',
+                notes:      'Registro inicial'
+            });
+        }
     }
 
     if (isEdit) {
@@ -1424,13 +1541,20 @@ function handleSaveUpdate(e) {
     const asset   = getAssetById(assetId);
     if (!asset) return;
 
-    const update = {
-        date:       fd.get('date'),
-        km:         fd.get('km') !== '' ? Number(fd.get('km')) : null,
-        batterySoh: fd.get('batterySoh') !== '' ? Number(fd.get('batterySoh')) : null,
-        incidents:  fd.get('incidents').trim(),
-        notes:      fd.get('notes').trim()
-    };
+    const update = asset.type === 'laptop'
+        ? {
+            date:             fd.get('date'),
+            batteryCondition: fd.get('batteryCondition') || 'excellent',
+            incidents:        fd.get('incidents').trim(),
+            notes:            fd.get('notes').trim()
+          }
+        : {
+            date:       fd.get('date'),
+            km:         fd.get('km') !== '' ? Number(fd.get('km')) : null,
+            batterySoh: fd.get('batterySoh') !== '' ? Number(fd.get('batterySoh')) : null,
+            incidents:  fd.get('incidents').trim(),
+            notes:      fd.get('notes').trim()
+          };
 
     asset.updates.push(update);
     saveData();
