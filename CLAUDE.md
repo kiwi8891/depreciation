@@ -6,8 +6,14 @@ HTML+CSS+JS vanilla · Chart.js CDN · Inter (Google Fonts) · GitHub Pages (kiw
 ## Arquitectura de datos
 localStorage como caché de sesión. Persistencia real = JSON export/import. NUNCA subir .json a git (.gitignore lo excluye). Estructura: `{version, assets[], lastSaved}`. Cada asset: `{id, name, type, purchaseDate, purchasePrice, subsidies, residualValuePct, expectedAnnualKm, updates[], marketAnchors[]}`.
 
-## Motor de depreciación
-Declining balance acelerado × factor SOH × factor km → anclado a precio de mercado (peso 70%→30% según antigüedad). Tasas anuales car: [25,18,13,10,8,7,6,5,5,5]%. Ebike: [20,15,11,9,7,6,5,5,5,5]%. Residual sugerido: car 12%, ebike 18%. SOH <90%→×0.95, <80%→×0.88, <70%→×0.78. Km ratio >1.5→×0.93, >2→×0.88.
+## Motor de depreciación (v1.2, 2026-10-26)
+valor = curva base × factor SOH × factor km × corrección de mercado, acotado entre el residual y el precio efectivo (nunca vale más de lo pagado).
+- Curva base: declining balance. Car [25,18,13,10,8,7,6,5,5,5]%, ebike [20,15,11,9,7,6,5,5,5,5]%. Residual sugerido car 12%, ebike 18%.
+- SOH: interpolación lineal 90→1,00 · 80→0,95 · 70→0,88 · 60→0,78 · 50→0,65 (sin escalones).
+- Km: km hechos desde el **primer registro** frente a esperados en la fecha del update. ±3% por cada 10.000 km (ebike: 2.000), tope ±10%.
+- Mercado: factor = precio_mercado / modelo(fecha_ancla), aplicado desde esa fecha y **sin caducidad** (un ancla nueva sustituye a la anterior).
+- Antes (v1.1): mezcla 70→30% que caducaba a 6 meses → valores que subían y saltos al caducar; km con escalones que contaban los km iniciales; premio ×1,04 por poco uso (el Tesla valía más que lo pagado). Corregido.
+- Cambiar el motor recalcula todo el histórico → un mes de ajuste puntual en MoneyWiz.
 
 ## Output clave → MoneyWiz
 El usuario anota el **valor actual** del activo en MoneyWiz; MoneyWiz calcula la pérdida. La caja morada (moneywiz-box) muestra: valor hoy / depreciación este mes / depreciación mes anterior.
@@ -15,9 +21,10 @@ El usuario anota el **valor actual** del activo en MoneyWiz; MoneyWiz calcula la
 ## Precio de mercado
 Actualizar cada 6 meses. Fuentes: Wallapop, Coches.net, eBay Kleinanzeigen (ebikes). Metodología: 3-5 anuncios similares → descartar extremos → mediana. Claude NO puede buscar precios — el usuario debe hacerlo y anotarlo en la app.
 
-## Activos actuales
-- **BYD Dolphin Surf Boost · Azul Cielo** — compra 12/02/2026 · 23.690€ · 2.996km · SOH 100% (no visible aún en app BYD). Referencias de mercado encontradas (13/04/2026, profesionales): 2025·1156km·Azul Cielo→21.900€ / 2026·1200km·Amarillo básico→20.900€ → mediana ≈21.400€ (pendiente de introducir en la tool).
-- **Riese & Müller** — pendiente de compra. SOH vía Bosch eBike Connect.
+## Activos actuales (JSON vigente: activos_2026-10-26.json)
+- **BYD Dolphin Surf Boost · Azul Cielo**: compra 12/02/2026 · 23.690€ · **0 km en la compra** · 10.243 km a 26/10/2026 · 10.000 km/año. Ancla: 21.900€ (13/04/2026, Coches.net).
+- **Tesla Model 3 Standard RWD · Blanco**: compra 24/10/2026 · 33.365€ · 0 km · nuevo · 10.000 km/año. Sin ancla aún. Ayudas pendientes: Plan Auto+ y deducción IRPF.
+- **Riese & Müller Charger4 Touring**: compra 12/04/2026 · 2.649€. Ancla de 1.900€ con referencias de 2023 y 4.000 km (no comparables): rehacerla con bicis similares a la suya.
 
 ## Subvenciones
 Campo `subsidies` reduce el precio efectivo. A 11/04/2026 sin subvenciones recibidas aún. Actualizar cuando lleguen (MOVES u otras).
@@ -34,6 +41,6 @@ Campo `subsidies` reduce el precio efectivo. A 11/04/2026 sin subvenciones recib
 Repo: git@github.com:kiwi8891/depreciation.git · rama main · SSH configurado (id_ed25519). No hay gh CLI — usar git directo con SSH.
 
 ## Próximos pasos pendientes
-- Introducir el precio de mercado del BYD en la tool (mediana ≈21.400€, refs: profesionales, abril 2026)
-- Añadir Riese & Müller cuando se compre
-- Actualizar `subsidies` del BYD cuando lleguen las ayudas MOVES
+- Rehacer el ancla de la R&M con referencias comparables
+- Ancla de mercado del Tesla y del BYD (la del BYD es de abril)
+- `subsidies` del Tesla (Auto+ e IRPF) y del BYD (MOVES) cuando lleguen

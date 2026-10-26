@@ -20,6 +20,10 @@ const CONFIG = {
         car:   15000,
         ebike: 3500
     },
+    // Km factor: ±kmPctPerStep of value per kmStep above/below expected, capped at ±kmMaxPct
+    kmStep:       { car: 10000, ebike: 2000 },
+    kmPctPerStep: 0.03,
+    kmMaxPct:     0.10,
     // How many months forward to project in chart
     projectionMonths: 120
 };
@@ -157,16 +161,20 @@ function getBaseValue(asset, targetDate) {
 
 /**
  * Battery State of Health adjustment factor.
- * SOH = 100% → no penalty; degrades below 90%.
+ * SOH ≥ 90% → no penalty; below that, linear interpolation between points (no steps).
  */
+const SOH_CURVE = [[90, 1.00], [80, 0.95], [70, 0.88], [60, 0.78], [50, 0.65]];
+
 function getBatteryFactor(soh) {
     if (soh === null || soh === undefined) return 1.0;
     const s = Number(soh);
-    if (s >= 90) return 1.00;
-    if (s >= 80) return 0.95;
-    if (s >= 70) return 0.88;
-    if (s >= 60) return 0.78;
-    return 0.65;
+    if (s >= SOH_CURVE[0][0]) return SOH_CURVE[0][1];
+    for (let i = 1; i < SOH_CURVE.length; i++) {
+        const [s1, f1] = SOH_CURVE[i - 1];
+        const [s2, f2] = SOH_CURVE[i];
+        if (s >= s2) return f2 + (f1 - f2) * (s - s2) / (s1 - s2);
+    }
+    return SOH_CURVE[SOH_CURVE.length - 1][1];
 }
 
 /**
@@ -180,24 +188,24 @@ function getConditionFactor(condition) {
 }
 
 /**
- * Km usage factor vs expected annual km.
+ * Km usage factor: km driven since the initial record vs. km expected at the update date.
+ * Continuous: ±kmPctPerStep per kmStep of deviation, capped at ±kmMaxPct.
  */
 function getKmFactor(asset, update) {
     if (!update || update.km === null || update.km === undefined) return 1.0;
 
-    const purchaseDate  = new Date(asset.purchaseDate);
-    const updateDate    = new Date(update.date);
-    const yearsElapsed  = Math.max((updateDate - purchaseDate) / (1000 * 60 * 60 * 24 * 365.25), 0.1);
-    const actualAnnual  = update.km / yearsElapsed;
-    const expectedAnnual = asset.expectedAnnualKm || CONFIG.defaultAnnualKm[asset.type];
-    const ratio          = actualAnnual / expectedAnnual;
+    const first = [...(asset.updates || [])]
+        .filter(u => u.km !== null && u.km !== undefined)
+        .sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+    const initialKm = first ? Number(first.km) : 0;
 
-    if (ratio > 2.0) return 0.88;
-    if (ratio > 1.5) return 0.93;
-    if (ratio > 1.2) return 0.97;
-    if (ratio < 0.5) return 1.04;
-    if (ratio < 0.7) return 1.02;
-    return 1.0;
+    const yearsElapsed   = Math.max((new Date(update.date) - new Date(asset.purchaseDate)) / (1000 * 60 * 60 * 24 * 365.25), 0);
+    const expectedAnnual = asset.expectedAnnualKm || CONFIG.defaultAnnualKm[asset.type] || 10000;
+    const excessKm       = (Number(update.km) - initialKm) - expectedAnnual * yearsElapsed;
+    const step           = CONFIG.kmStep[asset.type] || CONFIG.kmStep.car;
+    const adj            = Math.max(-CONFIG.kmMaxPct, Math.min(CONFIG.kmMaxPct, (excessKm / step) * CONFIG.kmPctPerStep));
+
+    return 1 - adj;
 }
 
 /**
@@ -212,31 +220,26 @@ function getLatestUpdate(asset, targetDate) {
 }
 
 /**
- * Get the most recent market anchor within the last 6 months.
+ * Get the most recent market anchor at or before targetDate (no expiry: it stays as correction until replaced).
  */
 function getRecentAnchor(asset, targetDate) {
     if (!asset.marketAnchors || asset.marketAnchors.length === 0) return null;
-    const sixMonthsAgo = new Date(targetDate);
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const purchaseDate = new Date(asset.purchaseDate);
     const valid = asset.marketAnchors
         .filter(a => {
             const d = new Date(a.date);
-            return d <= targetDate && d >= sixMonthsAgo;
+            return d <= targetDate && d >= purchaseDate && a.price > 0;
         })
         .sort((a, b) => new Date(b.date) - new Date(a.date));
     return valid[0] || null;
 }
 
 /**
- * Main value calculation combining model + factors + market anchor.
+ * Theoretical model: base curve × battery/condition × km factors.
  */
-function calculateValue(asset, targetDate = new Date()) {
-    const residualValue = getResidualValue(asset);
-
-    // 1. Base model
+function getModelValue(asset, targetDate) {
     let value = getBaseValue(asset, targetDate);
 
-    // 2. Adjustments from latest update
     const update = getLatestUpdate(asset, targetDate);
     if (update) {
         if (asset.type === 'laptop') {
@@ -246,20 +249,27 @@ function calculateValue(asset, targetDate = new Date()) {
             value *= getKmFactor(asset, update);
         }
     }
+    return value;
+}
 
-    // 3. Floor
-    value = Math.max(residualValue, value);
-
-    // 4. Market anchor blending (anchor weight fades linearly from 0.70 to 0.30 over 6 months)
+/**
+ * Market correction: ratio market price / model value on the anchor date.
+ * Applied to the whole curve from that date on, so the curve keeps its shape (no jumps, no expiry).
+ */
+function getMarketCorrection(asset, targetDate) {
     const anchor = getRecentAnchor(asset, targetDate);
-    if (anchor) {
-        const daysSince   = (targetDate - new Date(anchor.date)) / (1000 * 60 * 60 * 24);
-        const anchorWeight = Math.max(0.30, 0.70 - (daysSince / 180) * 0.40);
-        value = anchorWeight * anchor.price + (1 - anchorWeight) * value;
-        value = Math.max(residualValue, value);
-    }
+    if (!anchor) return 1.0;
+    const modelAtAnchor = getModelValue(asset, new Date(anchor.date));
+    return modelAtAnchor > 0 ? anchor.price / modelAtAnchor : 1.0;
+}
 
-    return Math.round(value);
+/**
+ * Main value calculation: model × market correction, between residual floor and effective price cap.
+ */
+function calculateValue(asset, targetDate = new Date()) {
+    const residualValue = getResidualValue(asset);
+    const value = getModelValue(asset, targetDate) * getMarketCorrection(asset, targetDate);
+    return Math.round(Math.min(getEffectivePrice(asset), Math.max(residualValue, value)));
 }
 
 /**
@@ -729,28 +739,20 @@ function renderDetail(id) {
                         <thead><tr><th>SOH</th><th>Factor</th></tr></thead>
                         <tbody>
                             <tr><td>≥ 90%</td><td>×1,00</td></tr>
-                            <tr><td>80–89%</td><td>×0,95</td></tr>
-                            <tr><td>70–79%</td><td>×0,88</td></tr>
-                            <tr><td>60–69%</td><td>×0,78</td></tr>
-                            <tr><td>&lt; 60%</td><td>×0,65</td></tr>
+                            <tr><td>80%</td><td>×0,95</td></tr>
+                            <tr><td>70%</td><td>×0,88</td></tr>
+                            <tr><td>60%</td><td>×0,78</td></tr>
+                            <tr><td>≤ 50%</td><td>×0,65</td></tr>
                         </tbody>
                     </table>
+                    <div class="methodology-block-text" style="margin-top:6px">Entre puntos se interpola: sin saltos.</div>
                     <div class="methodology-sub-title" style="margin-top:12px">Km reales vs. esperados</div>
-                    <table class="meth-table">
-                        <thead><tr><th>Ratio anual</th><th>Factor</th></tr></thead>
-                        <tbody>
-                            <tr><td>&gt; 2,0×</td><td>×0,88</td></tr>
-                            <tr><td>1,5–2,0×</td><td>×0,93</td></tr>
-                            <tr><td>1,2–1,5×</td><td>×0,97</td></tr>
-                            <tr><td>0,7–1,2×</td><td>×1,00</td></tr>
-                            <tr><td>0,5–0,7×</td><td>×1,02</td></tr>
-                            <tr><td>&lt; 0,5×</td><td>×1,04</td></tr>
-                        </tbody>
+                    <div class="methodology-block-text">Km hechos desde el registro inicial comparados con los esperados a esa fecha. Cada <strong>${(CONFIG.kmStep[asset.type] || CONFIG.kmStep.car).toLocaleString('es-ES')} km</strong> de más resta un <strong>${CONFIG.kmPctPerStep * 100}%</strong> (y de menos lo suma), con tope de <strong>±${CONFIG.kmMaxPct * 100}%</strong>. Continuo, sin escalones.</div>
                     </table>`}
                 </div>
                 <div class="methodology-block">
                     <div class="methodology-block-title">3 · Anclaje al precio de mercado</div>
-                    <div class="methodology-block-text">Cuando introduces un precio de mercado, se mezcla con el modelo teórico. El peso del mercado va del <strong>70%</strong> (el día que lo introduces) al <strong>30%</strong> (6 meses después), cuando el dato ya está "caducando".</div>
+                    <div class="methodology-block-text">Cuando introduces un precio de mercado, la app calcula cuánto se desvía del modelo ese día (p. ej. mercado −4%) y aplica esa <strong>corrección</strong> a toda la curva desde entonces. No caduca: un precio nuevo sustituye al anterior. Así la curva conserva su forma y el valor solo baja. Tope: nunca más que el precio efectivo de compra.</div>
                     <div class="methodology-block-text" style="margin-top:8px"><strong>Metodología para buscar precios:</strong> busca 3–5 anuncios de activos similares. Descarta los extremos. Usa la mediana. Fuentes: ${asset.type === 'laptop' ? 'Wallapop, eBay, Back Market.' : 'Wallapop, Coches.net, eBay Kleinanzeigen (ebikes).'}</div>
                     <div class="methodology-block-text" style="margin-top:8px">Actualiza cada <strong>6 meses</strong>. La app te avisará cuando sea el momento.</div>
                 </div>

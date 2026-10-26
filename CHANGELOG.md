@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0] — 2026-10-26
+
+### Motor de depreciación
+
+- **Precio de mercado como corrección** — factor mercado/modelo en la fecha del ancla, aplicado a toda la curva sin caducidad. Se acaban los valores que subían y el salto a los 6 meses
+- **Km continuos y desde el primer registro** — ±3% por cada 10.000 km (ebike 2.000) frente a lo esperado, tope ±10%
+- **SOH interpolado** — sin escalones
+- **Tope** — el valor nunca supera el precio efectivo de compra
+
 ## [1.1.0] — 2026-04-13
 
 ### Mejoras
