@@ -19,7 +19,9 @@ valor = curva base × factor SOH × factor km × corrección de mercado, acotado
 El usuario anota el **valor actual** del activo en MoneyWiz; MoneyWiz calcula la pérdida. La caja morada (moneywiz-box) muestra: valor hoy / depreciación este mes / depreciación mes anterior.
 
 ## Precio de mercado
-Actualizar cada 6 meses. Fuentes: Wallapop, Coches.net, eBay Kleinanzeigen (ebikes). Metodología: 3-5 anuncios similares → descartar extremos → mediana. Claude NO puede buscar precios — el usuario debe hacerlo y anotarlo en la app.
+Actualizar cada 6 meses. Fuentes: Wallapop, Coches.net, eBay Kleinanzeigen (ebikes). Metodología: 3-5 anuncios similares → descartar extremos → mediana.
+- Claude SÍ puede buscar: WebFetch a `coches.net/<marca>/<modelo>/segunda-mano/?MinYear=2025&MaxKms=20000` funciona (listado truncado a ~8 anuncios). AutoUncle da 403. WebSearch extended completa.
+- Casi todo son anuncios de **concesionario** (incluyen margen y garantía, +10-15 % sobre el precio de venta real). Decidir si el ancla es mediana×0,90 (venta realista) o el precio de los anuncios tal cual.
 
 ## Activos actuales (JSON vigente: activos_2026-10-26.json)
 - **BYD Dolphin Surf Boost · Azul Cielo**: compra 12/02/2026 · 23.690€ · **0 km en la compra** · 10.243 km a 26/10/2026 · 10.000 km/año. Ancla: 21.900€ (13/04/2026, Coches.net).
@@ -39,6 +41,14 @@ Campo `subsidies` reduce el precio efectivo. A 11/04/2026 sin subvenciones recib
 
 ## Git
 Repo: git@github.com:kiwi8891/depreciation.git · rama main · SSH configurado (id_ed25519). No hay gh CLI — usar git directo con SSH.
+
+## Búsqueda de mercado 2026-10-26 (pendiente de meter en la app)
+- **BYD Boost 2026** (coches.net, Concesur, km77): 20.500 € (9.500 km, Valladolid) · 19.900 € (3.790 km) · 19.900 € (3.100 km) · 21.900 € (1.500 km) · 21.900 € (4-5.000 km) → **mediana 20.500 €**. La app hoy da 18.657 €.
+- **Tesla Model 3**: anuncios 2025-26 entre 32.000 y 39.990 €, casi todos por encima de lo pagado (33.365 €), y "Standard" no siempre es la misma versión. Decisión: **sin ancla para el Tesla** hasta dentro de 4-6 meses (si no, el tope lo deja clavado en 33.365 €).
+- **Pendiente de Ger: opción A o B** para el BYD. A (recomendada) = 20.500 × 0,90 = **18.450 €** (venta realista, el valor queda casi igual). B = 20.500 € tal cual (+1.800 €).
+
+## Siguiente sesión empieza por
+Preguntar A/B del ancla del BYD → añadir el ancla (fecha 2026-10-26, fuente coches.net, refs) al JSON `activos_2026-10-26.json` → Ger lo importa y anota en MoneyWiz los valores de hoy (BYD según ancla, Tesla 33.299 €, R&M 1.685 €; la R&M probablemente sobredepreciada por su ancla no comparable).
 
 ## Próximos pasos pendientes
 - Rehacer el ancla de la R&M con referencias comparables
